@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grocery Elite - Perfect UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+        body { font-family: 'Outfit', sans-serif; background: #f8fafc; }
+        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(15px); }
+        .transition-all { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    </style>
+</head>
+<body class="p-4 pb-28 max-w-lg mx-auto">
+
+    <!-- App Header -->
+    <header class="py-6 flex justify-between items-center border-b border-slate-100">
+        <div>
+            <h1 class="text-3xl font-extrabold text-slate-900 tracking-tighter cursor-pointer" onclick="goHome()">Grocery <span class="text-indigo-600">Elite</span></h1>
+            <p id="sub-title" class="text-slate-400 font-medium text-xs uppercase tracking-wider">All Dashboard</p>
+        </div>
+        <div class="flex gap-1.5">
+            <button onclick="toggleAnalytics()" class="bg-slate-100 text-slate-700 px-3 py-2 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all">📊 Stats</button>
+            <button onclick="showHistoryPage()" class="bg-indigo-50 text-indigo-700 px-3 py-2 rounded-xl font-bold text-xs hover:bg-indigo-100 transition-all">📜 History</button>
+        </div>
+    </header>
+
+    <!-- Analytics Section -->
+    <div id="analytics-section" class="hidden my-4 glass p-4 rounded-3xl border border-white/50 shadow-sm">
+        <canvas id="myChart" class="h-32"></canvas>
+    </div>
+
+    <!-- MAIN CONTAINER -->
+    <div id="main-content" class="mt-6 space-y-4"></div>
+
+    <!-- FLOATING BAR -->
+    <div id="floating-bar" class="fixed bottom-6 left-4 right-4 max-w-lg mx-auto z-50">
+        <div class="glass p-2 rounded-3xl border border-white/50 shadow-2xl flex items-center">
+            <input type="text" id="new-p-name" placeholder="Add another person manually..." class="flex-1 bg-transparent p-3 outline-none text-slate-800 font-medium">
+            <button onclick="addPersonManual()" class="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-indigo-300 active:scale-95 transition-all">Add</button>
+        </div>
+    </div>
+      <script>
+        let people = JSON.parse(localStorage.getItem('grocery_data')) || [];
+        let historyLog = JSON.parse(localStorage.getItem('grocery_history')) || [];
+        let chartInstance;
+        let activeView = 'home'; 
+        let activePersonIndex = null;
+        let showStats = false;
+
+        function checkAndInsertBlankCard() {
+            let blanks = people.filter(p => p.name === 'Untitled Person');
+            if (blanks.length === 0) {
+                people.push({ name: 'Untitled Person', items: [], paid: 0 });
+            }
+        }
+
+        function extractNum(str) {
+            if (!str) return 1;
+            let num = parseFloat(str.toString().replace(/[^0-9.]/g, ''));
+            return isNaN(num) ? 1 : num; 
+        }
+
+        function calculateItemTotal(item) {
+            let rawQty = item.qty || '';
+            let qtyNum = extractNum(rawQty);
+            let rate = Number(item.rate) || 0;
+            let unitRule = item.unitRule || 'kg'; 
+
+            let cleanStr = rawQty.toString().toLowerCase().replace(/\s+/g, '');
+
+            if (unitRule === 'kg') {
+                if (cleanStr.includes('gm') || cleanStr.includes('g')) qtyNum = qtyNum / 1000;
+                if (cleanStr.includes('pav') || cleanStr.includes('पाव')) qtyNum = qtyNum * 0.25;
+                return Math.round(qtyNum * rate);
+            } 
+            
+            if (unitRule === 'pav') {
+                if (cleanStr.includes('kg') || cleanStr.includes('k')) qtyNum = qtyNum * 4;
+                if (cleanStr.includes('gm') || cleanStr.includes('g')) qtyNum = qtyNum / 250;
+                return Math.round(qtyNum * rate);
+            }
+
+            if (unitRule === 'gm') {
+                if (cleanStr.includes('kg') || cleanStr.includes('k')) qtyNum = qtyNum * 1000;
+                return Math.round(qtyNum * rate);
+            }
+
+            return Math.round(qtyNum * rate);
+        }
+
+        function updateTotalsLive() {
+            if (activePersonIndex === null) return;
+            let p = people[activePersonIndex];
+            let spent = p.items.reduce((s, i) => s + calculateItemTotal(i), 0);
+            const totalBillEl = document.getElementById('total-bill-display');
+            if (totalBillEl) {
+                totalBillEl.innerText = `₹${spent}`;
+            }
+        }
+        function render() {
+            if (activeView === 'home') checkAndInsertBlankCard();
+
+            localStorage.setItem('grocery_data', JSON.stringify(people));
+            localStorage.setItem('grocery_history', JSON.stringify(historyLog));
+            
+            const container = document.getElementById('main-content');
+            const floatingBar = document.getElementById('floating-bar');
+            const subTitle = document.getElementById('sub-title');
+
+            if (activeView === 'detail' && activePersonIndex !== null) {
+                floatingBar.classList.add('hidden');
+                let p = people[activePersonIndex];
+                subTitle.innerText = `Managing: ${p.name}`;
+                
+                let spent = p.items.reduce((s, i) => s + calculateItemTotal(i), 0);
+                if (p.items.length === 0) p.items.push({ name: '', qty: '', rate: '', unitRule: 'kg' });
+
+                container.innerHTML = `
+                    <button onclick="goHome()" class="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-xl mb-2 flex items-center gap-1">← Back to Dashboard</button>
+                    <div class="glass p-3 rounded-3xl border border-white/50 shadow-xl">
+                        <div class="flex flex-col gap-2 mb-4 px-1">
+                            <label class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Person Name</label>
+                            <input type="text" value="${p.name === 'Untitled Person' ? '' : p.name}" placeholder="Enter Name here..." oninput="updatePersonNameLive(${activePersonIndex}, this.value)" class="text-xl font-bold text-slate-900 bg-transparent border-b border-dashed border-slate-300 outline-none focus:border-indigo-500 py-1">
+                        </div>
+
+                        <!-- Labels Header (Width Adjusted) -->
+                        <div class="grid grid-cols-12 gap-1.5 px-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                            <div class="col-span-4">Item</div>
+                            <div class="col-span-3 text-center">Qty</div>
+                            <div class="col-span-3 text-center">Rate</div>
+                            <div class="col-span-2 text-center">Unit</div>
+                        </div>
+
+                        
+                        <div class="space-y-2 mb-4" id="items-list-container">
+                            ${p.items.map((item, i) => {
+                                let currentRule = item.unitRule || 'kg';
+                                return `
+                                <div class="grid grid-cols-12 gap-1.5 items-center bg-white/60 p-1.5 rounded-xl border border-slate-100" id="row-${i}">
+                                    <!-- Item Name (Cols 4) -->
+                                    <input id="item-${i}" value="${item.name}" placeholder="Potato" 
+                                        oninput="updateItemLive(${activePersonIndex}, ${i}, 'name', this.value)" 
+                                        onkeydown="handleKey(event, ${i}, 'item')"
+                                        class="col-span-4 p-2 rounded-lg bg-white border border-slate-200 text-xs font-semibold outline-none focus:border-indigo-400 w-full">
+                                    
+                                    <!-- Quantity (Cols 3) -->
+                                    <input id="qty-${i}" type="text" value="${item.qty || ''}" placeholder="2kg" 
+                                    oninput="updateItemLive(${activePersonIndex}, ${i}, 'qty', this.value)" 
+                                        onkeydown="handleKey(event, ${i}, 'qty')"
+                                        class="col-span-3 p-2 rounded-lg bg-white border border-slate-200 text-xs text-center outline-none focus:border-indigo-400 w-full">
+                                    
+                                    <!-- Rate Input (Cols 3) - Fits 4 Digits Easily -->
+                                    <input id="rate-${i}" type="number" value="${item.rate || ''}" placeholder="40" 
+                                        oninput="updateItemLive(${activePersonIndex}, ${i}, 'rate', this.value)" 
+                                        onkeydown="handleKey(event, ${i}, 'rate')"
+                                        class="col-span-3 p-2 rounded-lg bg-indigo-50 border border-indigo-100 text-xs text-center font-bold text-indigo-700 outline-none focus:border-indigo-400 w-full">
+                                    
+                                    <!-- Unit Select Box (Cols 2) -->
+                                    <select id="rule-${i}" onchange="updateItemLive(${activePersonIndex}, ${i}, 'unitRule', this.value)"
+                                        class="col-span-2 p-2 rounded-lg bg-slate-100 text-[11px] font-bold text-slate-600 border border-transparent outline-none focus:bg-indigo-100 focus:text-indigo-700 w-full text-center">
+                                        <option value="kg" ${currentRule === 'kg' ? 'selected' : ''}>/kg</option>
+                                        <option value="pav" ${currentRule === 'pav' ? 'selected' : ''}>/pav</option>
+                                        <option value="gm" ${currentRule === 'gm' ? 'selected' : ''}>/gm</option>
+                                        <option value="unit" ${currentRule === 'unit' ? 'selected' : ''}>/pcs</option>
+                                    </select>
+                                </div>
+                            `}).join('')}
+                        </div>
+
+                        <button onclick="addItemDirectly()" id="add-item-btn" class="w-full p-2.5 border-2 border-dashed border-indigo-200 rounded-xl text-indigo-400 text-xs font-bold hover:bg-indigo-50 transition-all mb-4">+ Add Item Row</button>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-white p-3 rounded-xl border border-slate-100">
+                                <label class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Advance Given</label>
+                                <input type="number" id="advance-input" value="${p.paid || ''}" placeholder="₹0" oninput="updatePaidLive(${activePersonIndex}, this.value)" class="w-full text-lg font-black text-emerald-600 bg-transparent outline-none">
+                            </div>
+                            <div class="bg-slate-900 p-3 rounded-xl text-white shadow-xl">
+                                <label class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Total Bill</label>
+                                <div class="text-xl font-black" id="total-bill-display">₹${spent}</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-4">
+                            <button onclick="share(${activePersonIndex})" class="bg-indigo-600 text-white font-bold py-3.5 rounded-xl text-[11px] shadow-md">SHARE INVOICE 📄</button>
+                            <button onclick="moveToHistory(${activePersonIndex})" class="bg-emerald-600 text-white font-bold py-3.5 rounded-xl text-[11px] shadow-md">MOVE TO HISTORY 📁</button>
+                        </div>
+                        <button onclick="deletePerson(${activePersonIndex})" class="w-full text-center text-[11px] text-red-400 mt-3 hover:text-red-600 transition-all">Cancel & Delete Card</button>
+                    </div>
+                `;
+            } else if (activeView === 'history') {
+                floatingBar.classList.add('hidden');
+                subTitle.innerText = "Past Invoices History";
+                let historyContent = `<button onclick="goHome()" class="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-xl mb-4 flex items-center gap-1">← Back to Dashboard</button>`;
+                
+                if (historyLog.length === 0) { historyContent += `<div class="text-center py-12 text-slate-400 font-medium">History khali hai!</div>`; } 
+                else {
+                    historyContent += historyLog.map(h => `
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-2 mb-3">
+                            <div class="flex justify-between items-center border-b pb-2">
+                                <div><h4 class="font-bold text-slate-800">${h.name}</h4><p class="text-[10px] text-slate-400">${h.date}</p></div>
+                                <span class="text-sm font-black text-indigo-600">₹${h.totalSpent}</span>
+                            </div>
+                            <div class="text-xs text-slate-500 max-h-20 overflow-y-auto">
+                                ${h.items.map(i => `• ${i.name} (${i.qty} x ₹${i.rate}/${i.unitRule || 'kg'}) = ₹${calculateItemTotal(i)}<br>`).join('')}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+                container.innerHTML = historyContent;
+            } else {
+                floatingBar.classList.remove('hidden');
+                subTitle.innerText = "All Dashboard";
+                container.innerHTML = people.map((p, idx) => {
+                    let spent = p.items.reduce((s, i) => s + calculateItemTotal(i), 0);
+                    let isBlank = p.name === 'Untitled Person';
+                    return `
+                        <div onclick="openPerson(${idx})" class="${isBlank ? 'border-2 border-dashed border-indigo-300 bg-indigo-50/30' : 'glass border border-white/50 shadow-md'} p-5 rounded-2xl hover:shadow-xl transition-all cursor-pointer flex justify-between items-center active:scale-[0.99]">
+                            <div>
+                                <h3 class="text-lg font-bold ${isBlank ? 'text-indigo-600 italic' : 'text-slate-800'}">${isBlank ? '✨ Start New Entry' : p.name}</h3>
+                                <p class="text-xs text-slate-400 font-medium">${isBlank ? 'Ready for entry' : p.items.length + ' items listed'}</p>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-xs font-bold text-slate-400 block uppercase tracking-wider">${isBlank ? 'Status' : 'Total Spent'}</span>
+                                <span class="text-lg font-black ${isBlank ? 'text-indigo-400 text-sm' : 'text-indigo-600'}">${isBlank ? 'Blank Card' : '₹'+spent}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            if(showStats) updateChart();
+        }
+
+        function handleKey(event, i, type) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                if (type === 'item') {
+                    document.getElementById(`qty-${i}`).focus();
+                } else if (type === 'qty') {
+                    let nextIdx = i + 1;
+                    let nextItemInput = document.getElementById(`item-${nextIdx}`);
+                    if (nextItemInput) {
+                        nextItemInput.focus();
+                    } else {
+                        addItemDirectly(); 
+                    }
+                } else if (type === 'rate') {
+                    let nextIdx = i + 1;
+                    let nextRateInput = document.getElementById(`rate-${nextIdx}`);
+                    if (nextRateInput) {
+                        nextRateInput.focus();
+                    } else {
+                        document.getElementById('advance-input').focus();
+                    }
+                }
+            }
+        }
+
+        function updateItemLive(pIdx, i, field, val) { 
+            people[pIdx].items[i][field] = val; 
+            localStorage.setItem('grocery_data', JSON.stringify(people));
+            updateTotalsLive(); 
+        }
+
+        function updatePersonNameLive(index, val) {
+            people[index].name = val.trim() || 'Untitled Person';
+            localStorage.setItem('grocery_data', JSON.stringify(people));
+        }
+
+        function updatePaidLive(pIdx, val) {
+            people[pIdx].paid = Number(val);
+            localStorage.setItem('grocery_data', JSON.stringify(people));
+        }
+
+        function addItemDirectly() { 
+            let pIdx = activePersonIndex;
+            people[pIdx].items.push({ name: '', qty: '', rate: '', unitRule: 'kg' }); 
+            localStorage.setItem('grocery_data', JSON.stringify(people));
+            
+            let nextIdx = people[pIdx].items.length - 1;
+            
+            const itemsContainer = document.getElementById('items-list-container');
+            const newRow = document.createElement('div');
+            newRow.className = "grid grid-cols-12 gap-1.5 items-center bg-white/60 p-1.5 rounded-xl border border-slate-100";
+            newRow.id = `row-${nextIdx}`;
+            newRow.innerHTML = `
+                <input id="item-${nextIdx}" value="" placeholder="Potato" 
+                    oninput="updateItemLive(${pIdx}, ${nextIdx}, 'name', this.value)" 
+                    onkeydown="handleKey(event, ${nextIdx}, 'item')"
+                    class="col-span-4 p-2 rounded-lg bg-white border border-slate-200 text-xs font-semibold outline-none focus:border-indigo-400 w-full">
+                
+                <input id="qty-${nextIdx}" type="text" value="" placeholder="2kg" 
+                    oninput="updateItemLive(${pIdx}, ${nextIdx}, 'qty', this.value)" 
+                    onkeydown="handleKey(event, ${nextIdx}, 'qty')"
+                    class="col-span-3 p-2 rounded-lg bg-white border border-slate-200 text-xs text-center outline-none focus:border-indigo-400 w-full">
+                
+                <!-- Rate Input (Cols 3) -->
+                <input id="rate-${nextIdx}" type="number" value="" placeholder="40" 
+                    oninput="updateItemLive(${pIdx}, ${nextIdx}, 'rate', this.value)" 
+                    onkeydown="handleKey(event, ${nextIdx}, 'rate')"
+                    class="col-span-3 p-2 rounded-lg bg-indigo-50 border border-indigo-100 text-xs text-center font-bold text-indigo-700 outline-none focus:border-indigo-400 w-full">
+                
+                <!-- Unit Select Box (Cols 2) -->
+                <select id="rule-${nextIdx}" onchange="updateItemLive(${pIdx}, ${nextIdx}, 'unitRule', this.value)"
+                    class="col-span-2 p-2 rounded-lg bg-slate-100 text-[11px] font-bold text-slate-600 border border-transparent outline-none focus:bg-indigo-100 focus:text-indigo-700 w-full text-center">
+                    <option value="kg" selected>/kg</option>
+                    <option value="pav">/pav</option>
+                    <option value="gm">/gm</option>
+                    <option value="unit">/pcs</option>
+                </select>
+            `;
+            itemsContainer.appendChild(newRow);
+            
+            setTimeout(() => {
+                let targetInput = document.getElementById(`item-${nextIdx}`);
+                if (targetInput) targetInput.focus();
+            }, 50);
+        }
+
+        function openPerson(index) { activeView = 'detail'; activePersonIndex = index; render(); }
+        function goHome() { activeView = 'home'; activePersonIndex = null; render(); }
+
+        function moveToHistory(index) {
+            let p = people[index];
+            let spent = p.items.reduce((s, i) => s + calculateItemTotal(i), 0);
+            if(p.name === 'Untitled Person' || p.items.length === 0) { alert("Please enter valid name and items first!"); return; }
+            
+            if(confirm(`Move ${p.name}'s invoice to history?`)) {
+                let timestamp = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+                historyLog.unshift({ name: p.name, date: timestamp, items: p.items.filter(i=>i.name), paid: p.paid, totalSpent: spent });
+                people.splice(index, 1);
+                goHome();
+            }
+        }
+
+        function addPersonManual() {
+            const input = document.getElementById('new-p-name');
+            if (input.value.trim()) { people.unshift({ name: input.value.trim(), items: [], paid: 0 }); input.value = ''; render(); }
+        }
+        function deletePerson(pIdx) { people.splice(pIdx, 1); goHome(); }
+
+        function toggleAnalytics() {
+            showStats = !showStats;
+            const el = document.getElementById('analytics-section');
+            if(showStats) { el.classList.remove('hidden'); updateChart(); }
+            else { el.classList.add('hidden'); }
+        }
+
+        function updateChart() {
+            const ctx = document.getElementById('myChart').getContext('2d');
+            let activePeople = people.filter(p => p.name !== 'Untitled Person');
+            if(chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: activePeople.map(p => p.name), datasets: [{ data: activePeople.map(p => p.items.reduce((s,i)=>s+calculateItemTotal(i),0)), backgroundColor: '#4f46e5', borderRadius: 8 }] },
+                options: { plugins: { legend: { display: false } }, scales: { y: { display: false }, x: { grid: { display: false } } } }
+            });
+        }
+
+        function showHistoryPage() { activeView = 'history'; render(); }
+
+        function share(pIdx) {
+            let p = people[pIdx];
+            let spent = p.items.reduce((s, i) => s + calculateItemTotal(i), 0);
+            let bal = p.paid - spent;
+            let msg = `*🛒 GROCERY INVOICE*\n*For:* ${p.name}\n\n`;
+            p.items.forEach(i => { if(i.name) msg += `• ${i.name} (${i.qty} x ₹${i.rate}/${i.unitRule || 'kg'}) = ₹${calculateItemTotal(i)}\n`; });
+            msg += `\n*Total Spent:* ₹${spent}\n*Amount Given:* ₹${p.paid}\n*Balance:* ₹${bal}\n\n_Generated via Grocery Elite_`;
+            window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+        }
+
+        render();
+    </script>
+</body>
+</html>
+    
